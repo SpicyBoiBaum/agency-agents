@@ -1,5 +1,7 @@
 // Frontend der Finanz-KI-Analyse (ohne Build-Schritt).
 
+import { createAlertStore } from './alerts.js';
+
 const $ = (id) => document.getElementById(id);
 
 const QUICKPICKS = {
@@ -65,7 +67,8 @@ async function api(path) {
 
 // ---- Zustand ----------------------------------------------------------------
 
-const state = { symbol: null, range: '1y', quote: null, analysis: null };
+const state = { symbol: null, range: '1y', quote: null, analysis: null, prices: {} };
+const alerts = createAlertStore();
 
 const store = {
   get(key, fallback) {
@@ -200,6 +203,7 @@ function flash(el, dir) {
 }
 
 function updateWatchlistPrices(live) {
+  Object.assign(state.prices, live);
   for (const li of $('watchlist').querySelectorAll('li[data-symbol]')) {
     const q = live[li.dataset.symbol];
     const el = li.querySelector('[data-price]');
@@ -342,6 +346,7 @@ function renderQuote(q) {
   updateStar();
 
   renderChart(q.candles);
+  renderAlerts();
 
   const rsiCls = k.rsi14 > 70 ? 'down' : k.rsi14 < 30 ? 'up' : '';
   const rsiHint = k.rsi14 > 70 ? ' (überkauft)' : k.rsi14 < 30 ? ' (überverkauft)' : '';
@@ -407,6 +412,7 @@ function openSymbol(symbol) {
   if (!symbol || symbol === state.symbol) return;
   state.symbol = symbol;
   resetAnalysis();
+  openAlertPanel(false);
   loadQuote(symbol);
 }
 
@@ -628,9 +634,233 @@ async function startAnalysis() {
 $('analyze').addEventListener('click', startAnalysis);
 $('focus').addEventListener('keydown', (e) => e.key === 'Enter' && startAnalysis());
 
+// ---- Kursalarme -------------------------------------------------------------
+
+const DIR_LABEL = { ueber: 'steigt über', unter: 'fällt unter' };
+let alertPriceLines = [];
+
+function currentPrice(symbol) {
+  if (state.quote?.symbol === symbol) return state.quote.kurs;
+  return state.prices[symbol]?.kurs ?? null;
+}
+
+function alertItem(a, { showSymbol }) {
+  const kurs = currentPrice(a.symbol);
+  const dist = kurs ? a.ziel / kurs - 1 : null;
+  const status = a.ausgeloestAm
+    ? `<span class="tag fired">ausgelöst ${new Date(a.ausgeloestAm).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })} bei ${fmtPrice(a.ausloesekurs, a.waehrung)}</span>`
+    : dist != null
+      ? `<span class="muted">noch ${fmtPct(Math.abs(dist), 1).replace('+', '')} entfernt</span>`
+      : '';
+  return `<li data-id="${esc(a.id)}" class="${a.ausgeloestAm ? 'fired' : ''}">
+    <span class="info" data-open="${esc(a.symbol)}" title="${esc(a.name)}">
+      ${showSymbol ? `<strong>${esc(a.symbol)}</strong> ` : ''}${DIR_LABEL[a.richtung]} <strong>${fmtPrice(a.ziel, a.waehrung)}</strong>
+      ${a.notiz ? `<br><span class="muted">${esc(a.notiz)}</span>` : ''}<br>${status}
+    </span>
+    <span class="actions">
+      ${a.ausgeloestAm ? `<button data-action="rearm" title="Erneut scharf schalten">↻</button>` : ''}
+      <button data-action="remove" title="Alarm löschen">✕</button>
+    </span>
+  </li>`;
+}
+
+function renderAlerts() {
+  const all = alerts.all().sort((a, b) => Boolean(a.ausgeloestAm) - Boolean(b.ausgeloestAm) || a.symbol.localeCompare(b.symbol));
+  $('alerts').innerHTML = all.map((a) => alertItem(a, { showSymbol: true })).join('');
+  $('alerts-empty').hidden = all.length > 0;
+  $('notify-btn').hidden = !(all.length && 'Notification' in window && Notification.permission === 'default');
+
+  if (state.symbol) {
+    $('alert-symbol').textContent = state.quote?.name ? `${state.quote.name} (${state.symbol})` : state.symbol;
+    $('alert-symbol-list').innerHTML = alerts
+      .forSymbol(state.symbol)
+      .map((a) => alertItem(a, { showSymbol: false }))
+      .join('');
+    const activeHere = alerts.forSymbol(state.symbol).filter((a) => !a.ausgeloestAm).length;
+    $('alert-btn').textContent = activeHere ? `🔔${activeHere}` : '🔔';
+  }
+
+  // Aktive Alarme als gestrichelte Linien im Chart
+  if (series.candles) {
+    alertPriceLines.forEach((l) => series.candles.removePriceLine(l));
+    alertPriceLines = alerts
+      .forSymbol(state.symbol)
+      .filter((a) => !a.ausgeloestAm)
+      .map((a) =>
+        series.candles.createPriceLine({
+          price: a.ziel,
+          color: cssVar('--warn'),
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `🔔 ${a.richtung === 'ueber' ? '↑' : '↓'}`,
+        }),
+      );
+  }
+}
+
+function onAlertListClick(e) {
+  const li = e.target.closest('li[data-id]');
+  if (!li) return;
+  const action = e.target.closest('button')?.dataset.action;
+  if (action === 'remove') alerts.remove(li.dataset.id);
+  else if (action === 'rearm') {
+    const a = alerts.all().find((x) => x.id === li.dataset.id);
+    const kurs = a && currentPrice(a.symbol);
+    // Liegt der Kurs noch jenseits der Marke, würde der Alarm sofort wieder auslösen.
+    if (a && kurs != null && (a.richtung === 'ueber' ? kurs >= a.ziel : kurs <= a.ziel)) {
+      return toast(`Der Kurs von ${a.symbol} liegt noch ${a.richtung === 'ueber' ? 'über' : 'unter'} ${fmtPrice(a.ziel, a.waehrung)}. Lege besser einen neuen Alarm an.`);
+    }
+    alerts.rearm(li.dataset.id);
+  } else if (e.target.closest('[data-open]')) return pick(e.target.closest('[data-open]').dataset.open);
+  else return;
+  renderAlerts();
+}
+$('alerts').addEventListener('click', onAlertListClick);
+$('alert-symbol-list').addEventListener('click', onAlertListClick);
+
+function setAlertPrice(price) {
+  const kurs = state.quote?.kurs;
+  $('alert-price').value = Number(price.toPrecision(6));
+  if (kurs) $('alert-dir').value = price < kurs ? 'unter' : 'ueber';
+}
+
+function openAlertPanel(open = $('alert-panel').hidden) {
+  $('alert-panel').hidden = !open;
+  $('alert-btn').setAttribute('aria-expanded', String(open));
+  $('alert-form-error').hidden = true;
+  if (!open || !state.quote) return;
+  const q = state.quote;
+  const k = q.kennzahlen || {};
+  const presets = [
+    ['−10 %', q.kurs * 0.9],
+    ['−5 %', q.kurs * 0.95],
+    ['+5 %', q.kurs * 1.05],
+    ['+10 %', q.kurs * 1.1],
+    ['52W-Hoch', k.hoch52W],
+    ['52W-Tief', k.tief52W],
+    ['SMA 200', k.gleitendeDurchschnitte?.sma200],
+  ].filter(([, v]) => v && Math.abs(v / q.kurs - 1) > 0.001);
+  $('alert-presets').innerHTML = presets
+    .map(([label, v]) => `<button type="button" class="chip" data-price="${v}">${label}: ${fmtPrice(v)}</button>`)
+    .join('');
+  setAlertPrice(q.kurs * 1.05);
+  renderAlerts();
+  $('alert-price').focus();
+}
+
+$('alert-btn').addEventListener('click', () => openAlertPanel());
+$('alert-presets').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-price]');
+  if (b) setAlertPrice(Number(b.dataset.price));
+});
+$('alert-price').addEventListener('input', () => {
+  $('alert-form-error').hidden = true;
+  const v = Number($('alert-price').value);
+  if (v && state.quote?.kurs) $('alert-dir').value = v < state.quote.kurs ? 'unter' : 'ueber';
+});
+$('alert-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = state.quote;
+  if (!q) return;
+  try {
+    alerts.add({
+      symbol: q.symbol,
+      name: q.name,
+      waehrung: q.waehrung,
+      ziel: $('alert-price').value,
+      richtung: $('alert-dir').value,
+      notiz: $('alert-note').value.trim(),
+      aktuell: q.kurs,
+    });
+    $('alert-form-error').hidden = true;
+    $('alert-note').value = '';
+    renderAlerts();
+    requestNotifications();
+    scheduleLive(); // ggf. Hintergrund-Prüfung aktivieren
+  } catch (err) {
+    $('alert-form-error').textContent = err.message;
+    $('alert-form-error').hidden = false;
+  }
+});
+
+function requestNotifications() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission()
+      .catch(() => {})
+      .finally(renderAlerts);
+  }
+}
+$('notify-btn').addEventListener('click', requestNotifications);
+
+function toast(html, { onClick, timeout = 0 } = {}) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<div class="body">${html}</div><button aria-label="Schließen">×</button>`;
+  el.querySelector('button').addEventListener('click', () => el.remove());
+  if (onClick) el.querySelector('.body').addEventListener('click', () => (onClick(), el.remove()));
+  $('toasts').append(el);
+  if (timeout) setTimeout(() => el.remove(), timeout);
+  return el;
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1175].forEach((freq, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.22);
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + i * 0.22 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.22 + 0.2);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.22);
+      o.stop(ctx.currentTime + i * 0.22 + 0.21);
+    });
+    setTimeout(() => ctx.close(), 1000);
+  } catch {
+    // Audio nicht verfügbar oder vom Browser blockiert
+  }
+}
+
+function notifyAlert(a) {
+  const text = `${a.symbol} ${a.richtung === 'ueber' ? 'ist über' : 'ist unter'} ${fmtPrice(a.ziel, a.waehrung)} – aktuell ${fmtPrice(a.ausloesekurs, a.waehrung)}`;
+  toast(`<strong>🔔 Kursalarm: ${esc(a.name)}</strong><br>${esc(text)}${a.notiz ? `<br><span class="muted">${esc(a.notiz)}</span>` : ''}`, {
+    onClick: () => pick(a.symbol),
+  });
+  beep();
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const n = new Notification(`🔔 Kursalarm: ${a.name}`, { body: a.notiz ? `${text}\n${a.notiz}` : text, tag: a.id });
+      n.onclick = () => {
+        window.focus();
+        pick(a.symbol);
+        n.close();
+      };
+    } catch {
+      // manche Browser erlauben Notification nur über einen Service Worker
+    }
+  }
+}
+
+function checkAlerts(live) {
+  const fired = alerts.check(live);
+  fired.forEach(notifyAlert);
+  if (fired.length || alerts.all().length) renderAlerts();
+}
+
+window.addEventListener('storage', (e) => {
+  if (e.key === alerts.key) {
+    alerts.reload();
+    renderAlerts();
+  }
+});
+
 // ---- Live-Kurse --------------------------------------------------------------
 
 const LIVE_INTERVAL_MS = 15_000; // Kurs + Watchlist
+const BACKGROUND_INTERVAL_MS = 60_000; // Hintergrund-Tab: nur wenn Alarme aktiv sind
 const MACRO_EVERY_N_TICKS = 4; // Makro-Leiste etwa jede Minute
 let liveTimer = null;
 let liveTick = 0;
@@ -677,32 +907,40 @@ function updateAssetLive(q) {
 }
 
 async function refreshLive() {
-  const symbols = [...new Set([state.symbol, ...getWatchlist().map((w) => w.symbol)].filter(Boolean))];
+  const symbols = [
+    ...new Set([state.symbol, ...getWatchlist().map((w) => w.symbol), ...alerts.activeSymbols()].filter(Boolean)),
+  ];
   const tasks = [];
   if (symbols.length) {
     tasks.push(
       api(`/api/live?symbols=${encodeURIComponent(symbols.join(','))}`).then((live) => {
         if (state.symbol && live[state.symbol]) updateAssetLive(live[state.symbol]);
         updateWatchlistPrices(live);
+        checkAlerts(live);
       }),
     );
   }
-  if (liveTick % MACRO_EVERY_N_TICKS === 0) tasks.push(renderMacro());
+  if (!document.hidden && liveTick % MACRO_EVERY_N_TICKS === 0) tasks.push(renderMacro());
   liveTick++;
   await Promise.allSettled(tasks);
 }
 
 function scheduleLive() {
   clearTimeout(liveTimer);
-  if (document.hidden) return; // im Hintergrund-Tab pausieren
-  liveTimer = setTimeout(async () => {
-    await refreshLive();
-    scheduleLive();
-  }, LIVE_INTERVAL_MS);
+  // Im Hintergrund-Tab pausieren – außer Kursalarme müssen überwacht werden.
+  const hasAlerts = alerts.activeSymbols().length > 0;
+  if (document.hidden && !hasAlerts) return;
+  liveTimer = setTimeout(
+    async () => {
+      await refreshLive();
+      scheduleLive();
+    },
+    document.hidden ? BACKGROUND_INTERVAL_MS : LIVE_INTERVAL_MS,
+  );
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return clearTimeout(liveTimer);
+  if (document.hidden) return scheduleLive();
   refreshLive().finally(scheduleLive); // beim Zurückkehren sofort aktualisieren
 });
 
@@ -710,6 +948,8 @@ document.addEventListener('visibilitychange', () => {
 
 renderMacro();
 renderWatchlist();
+renderAlerts();
+if (alerts.activeSymbols().length) refreshLive(); // Alarme sofort prüfen
 scheduleLive();
 if (location.hash.length > 1) openSymbol(decodeURIComponent(location.hash.slice(1)).toUpperCase());
 api('/api/health')

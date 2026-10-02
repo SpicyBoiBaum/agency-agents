@@ -29,6 +29,12 @@
         <p id="watchlist-empty" class="muted small">Noch leer – füge Werte über ☆ hinzu.</p>
       </section>
       <section>
+        <h3>Kursalarme</h3>
+        <ul id="alerts" class="alert-list"></ul>
+        <p id="alerts-empty" class="muted small">Keine Alarme. Öffne einen Wert und klicke auf 🔔.</p>
+        <button id="notify-btn" class="chip" hidden>🔔 Browser-Benachrichtigungen erlauben</button>
+      </section>
+      <section>
         <h3>Schnellauswahl</h3>
         <div class="chip-group" id="quickpicks"></div>
       </section>
@@ -50,6 +56,7 @@
             <div class="asset-title">
               <h1 id="asset-name"></h1>
               <button id="star" class="icon-btn" title="Zur Watchlist">☆</button>
+              <button id="alert-btn" class="icon-btn" title="Kursalarm setzen" aria-expanded="false">🔔</button>
             </div>
             <div class="muted"><span id="asset-symbol"></span> · <span id="asset-type" class="badge"></span> · <span id="asset-exchange"></span></div>
           </div>
@@ -58,6 +65,25 @@
             <div id="asset-change" class="change"></div>
             <div class="muted small"><span id="asset-live" class="live" hidden></span> <span id="asset-time"></span></div>
           </div>
+        </section>
+
+        <section id="alert-panel" class="card alert-panel" hidden>
+          <h3>🔔 Kursalarm für <span id="alert-symbol"></span></h3>
+          <form id="alert-form" class="alert-form">
+            <label>Wenn der Kurs
+              <select id="alert-dir">
+                <option value="ueber">steigt über</option>
+                <option value="unter">fällt unter</option>
+              </select>
+            </label>
+            <label>Preis <input id="alert-price" type="number" step="any" min="0" required inputmode="decimal" /></label>
+            <label class="grow">Notiz (optional) <input id="alert-note" type="text" maxlength="140" placeholder="z. B. Nachkaufen" /></label>
+            <button type="submit" class="primary">Alarm setzen</button>
+          </form>
+          <div class="chip-group small" id="alert-presets"></div>
+          <div id="alert-form-error" class="error small" hidden></div>
+          <ul id="alert-symbol-list" class="alert-list"></ul>
+          <p class="muted small">Alarme werden geprüft, solange die App in einem Browser-Tab geöffnet ist (auch im Hintergrund, dann etwa einmal pro Minute). Sie sind nur in diesem Browser gespeichert.</p>
         </section>
 
         <section class="card">
@@ -121,6 +147,8 @@
       </div>
     </main>
   </div>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
 
   <footer class="footer muted small">
     Daten: Yahoo Finance, CoinGecko, alternative.me · KI: Claude (Anthropic) · Keine Anlageberatung – alle Angaben ohne Gewähr.
