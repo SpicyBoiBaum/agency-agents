@@ -6,6 +6,7 @@ Web-App, die **Kurse von Aktien, ETFs und Kryptowährungen** anzeigt und per Kli
 
 - **Suche** nach Name, Ticker oder ISIN-nahen Begriffen (z. B. „Apple“, „MSCI World“, „Bitcoin“, `SAP.DE`, `BTC-EUR`)
 - **Live-Kurse**: Kurs, Tagesveränderung, letzte Chart-Kerze, Watchlist und Makro-Leiste aktualisieren sich automatisch (alle 15 s, Makro jede Minute). Kursänderungen blinken grün/rot, und eine Anzeige zeigt „● Live“ oder „Börse geschlossen“. Im Hintergrund-Tab pausiert die Aktualisierung.
+- **Kursalarme**: Über 🔔 am Wert einen Alarm setzen („steigt über“ / „fällt unter“ einen Preis, optional mit Notiz). Schnellwahl für ±5 %, ±10 %, 52W-Hoch/-Tief und SMA 200. Aktive Alarme erscheinen als gestrichelte Linie im Chart und in der Seitenleiste mit Abstand zum Ziel. Beim Auslösen gibt es eine Meldung in der App, einen Ton und, wenn erlaubt, eine Browser-Benachrichtigung. Ein Alarm löst einmal aus und lässt sich mit ↻ wieder scharf schalten.
 - **Kerzen-Chart** mit SMA 50/200 und Volumen, Zeiträume 1M bis Max
 - **Technische Kennzahlen**: Trend, RSI, MACD, Bollinger-Bänder, ATR, Volatilität, Max. Drawdown, 52W-Hoch/Tief, Golden/Death Cross, Unterstützungen/Widerstände, Performance (1W bis 5J, YTD)
 - **Makro-Leiste** (Tagesveränderung): S&P 500, Nasdaq, DAX, Euro Stoxx 50, VIX, US-10J-Rendite, Dollar-Index, EUR/USD, Gold, Öl, Bitcoin
@@ -64,7 +65,7 @@ server.js            HTTP-Server (ohne Framework), API + statische Dateien
 src/market.js        Datenquellen: Yahoo Finance, CoinGecko, alternative.me
 src/indicators.js    Technische Indikatoren (reine Funktionen)
 src/analysis.js      Claude-Aufruf: Prompt, Websuche, Streaming, pause_turn, Fallback
-public/              Frontend (HTML/CSS/JS, kein Build-Schritt)
+public/              Frontend (HTML/CSS/JS, kein Build-Schritt), alerts.js = Logik der Kursalarme
 test/                Unit- und End-to-End-Tests mit simulierten APIs
 ```
 
@@ -77,5 +78,6 @@ npm test
 ## Hinweise
 
 - Datenquellen sind inoffiziell bzw. kostenlos. „Live“ heißt: so aktuell, wie Yahoo die Kurse liefert. Das ist für viele Börsen in Echtzeit, für manche (z. B. Xetra) bis zu 15 Minuten verzögert. Krypto läuft rund um die Uhr. Einzelne Quellen (z. B. Fundamentaldaten von Yahoo) fallen manchmal aus. Die KI ergänzt fehlende Daten dann per Websuche.
+- Kursalarme werden im Browser gespeichert und geprüft. Sie funktionieren, solange die App in einem Tab geöffnet ist, auch im Hintergrund (dann etwa einmal pro Minute). Bei geschlossenem Browser gibt es keine Benachrichtigung.
 - Der Server lauscht standardmäßig nur auf `127.0.0.1`. Wer ihn öffentlich betreibt, sollte Authentifizierung und Rate-Limits davorschalten, weil jede Analyse API-Kosten verursacht.
 - **Keine Anlageberatung.** Die KI kann sich irren. Alle Angaben ohne Gewähr.
