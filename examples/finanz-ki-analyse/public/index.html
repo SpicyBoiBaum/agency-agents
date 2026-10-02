@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finanz-KI-Analyse</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">📈 <span>Finanz-KI-Analyse</span></div>
+    <div class="search">
+      <input id="search" type="search" autocomplete="off" placeholder="Aktie, ETF oder Krypto suchen – z. B. Apple, MSCI World, Bitcoin, SAP.DE" />
+      <ul id="suggestions" class="suggestions" hidden></ul>
+    </div>
+  </header>
+
+  <div id="macro" class="macro" aria-label="Marktüberblick"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section>
+        <h3>Watchlist</h3>
+        <ul id="watchlist" class="watchlist"></ul>
+        <p id="watchlist-empty" class="muted small">Noch leer – füge Werte über ☆ hinzu.</p>
+      </section>
+      <section>
+        <h3>Schnellauswahl</h3>
+        <div class="chip-group" id="quickpicks"></div>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="welcome" class="card welcome">
+        <h2>Willkommen 👋</h2>
+        <p>Suche oben nach einer Aktie, einem ETF oder einer Kryptowährung oder wähle links einen Wert aus.
+          Du siehst Kurs, Chart, technische Kennzahlen und Nachrichten. Mit <strong>„KI-Analyse starten“</strong>
+          wertet eine KI alle kursrelevanten Faktoren aus – Technik, Fundamentaldaten, Bewertung, Nachrichten,
+          Makro-Umfeld, Sentiment, Regulierung und mehr – und recherchiert dafür live im Web.</p>
+        <p class="muted small">Keine Anlageberatung. Kursdaten ohne Gewähr, ggf. verzögert.</p>
+      </div>
+
+      <div id="asset" hidden>
+        <section class="card asset-head">
+          <div>
+            <div class="asset-title">
+              <h1 id="asset-name"></h1>
+              <button id="star" class="icon-btn" title="Zur Watchlist">☆</button>
+            </div>
+            <div class="muted"><span id="asset-symbol"></span> · <span id="asset-type" class="badge"></span> · <span id="asset-exchange"></span></div>
+          </div>
+          <div class="price-box">
+            <div id="asset-price" class="price"></div>
+            <div id="asset-change" class="change"></div>
+            <div class="muted small"><span id="asset-live" class="live" hidden></span> <span id="asset-time"></span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="chart-toolbar">
+            <div class="seg" id="ranges">
+              <button data-range="1mo">1M</button><button data-range="3mo">3M</button><button data-range="6mo">6M</button>
+              <button data-range="1y" class="active">1J</button><button data-range="2y">2J</button><button data-range="5y">5J</button><button data-range="max">Max</button>
+            </div>
+            <div class="legend small"><span class="dot sma50"></span>SMA 50 <span class="dot sma200"></span>SMA 200</div>
+          </div>
+          <div id="chart" class="chart"></div>
+        </section>
+
+        <section class="grid-2">
+          <div class="card">
+            <h3>Technische Kennzahlen</h3>
+            <div id="metrics" class="metrics"></div>
+          </div>
+          <div class="card">
+            <h3>Performance</h3>
+            <div id="performance" class="perf"></div>
+            <h3 class="mt">Unterstützung / Widerstand</h3>
+            <div id="levels" class="small"></div>
+          </div>
+        </section>
+
+        <section class="card ai">
+          <div class="ai-head">
+            <h2>🤖 KI-Analyse</h2>
+            <div class="ai-controls">
+              <input id="focus" type="text" maxlength="500" placeholder="Optional: Fokus oder Frage, z. B. „Lohnt sich ein Sparplan?“" />
+              <button id="analyze" class="primary">KI-Analyse starten</button>
+            </div>
+          </div>
+          <div id="ai-progress" class="progress" hidden>
+            <div class="spinner"></div>
+            <div><div id="ai-status"></div><ul id="ai-searches" class="searches small"></ul></div>
+          </div>
+          <div id="ai-error" class="error" hidden></div>
+          <div id="ai-score" class="score" hidden></div>
+          <details id="ai-thinking-box" class="thinking" hidden>
+            <summary>Gedankengang der KI</summary>
+            <div id="ai-thinking"></div>
+          </details>
+          <article id="ai-report" class="report"></article>
+          <div id="ai-sources-box" hidden>
+            <h3>Quellen</h3>
+            <ol id="ai-sources" class="sources small"></ol>
+          </div>
+          <details id="ai-data-box" class="thinking" hidden>
+            <summary>Daten, die an die KI übergeben wurden</summary>
+            <pre id="ai-data"></pre>
+          </details>
+          <div id="ai-meta" class="muted small"></div>
+        </section>
+
+        <section class="card">
+          <h3>Aktuelle Schlagzeilen</h3>
+          <ul id="news" class="news"></ul>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <footer class="footer muted small">
+    Daten: Yahoo Finance, CoinGecko, alternative.me · KI: Claude (Anthropic) · Keine Anlageberatung – alle Angaben ohne Gewähr.
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
