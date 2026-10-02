@@ -15,8 +15,9 @@ COPY server.js ./
 COPY src ./src
 COPY public ./public
 
-RUN mkdir -p /data && chown node:node /data
-USER node
+# Läuft als root: Hosting-Volumes (z. B. bei Railway) werden root-eigen
+# eingehängt, ein unprivilegierter Benutzer könnte dort nicht schreiben.
+RUN mkdir -p /data
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:${PORT}/api/health || exit 1
