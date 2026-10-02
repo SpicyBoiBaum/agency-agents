@@ -17,8 +17,15 @@ export function createStore(dir = process.env.DATA_DIR || './data') {
   }
   const persist = () => {
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 1), { mode: 0o600 });
-    renameSync(tmp, file);
+    try {
+      writeFileSync(tmp, JSON.stringify(data, null, 1), { mode: 0o600 });
+      renameSync(tmp, file);
+    } catch (err) {
+      if (err.code === 'EACCES' || err.code === 'EROFS') {
+        err.message = `Keine Schreibrechte im Datenverzeichnis "${dir}" (DATA_DIR). Prüfe Pfad und Rechte des Volumes. (${err.message})`;
+      }
+      throw err;
+    }
   };
   return {
     dir,
