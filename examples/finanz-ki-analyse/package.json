@@ -8,13 +8,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "vapid": "web-push generate-vapid-keys"
   },
   "engines": {
     "node": ">=20.12"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0"
+    "@anthropic-ai/sdk": "^0.131.0",
+    "web-push": "^3.6.7"
   },
   "license": "MIT"
 }

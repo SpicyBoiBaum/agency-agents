@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anmelden – Finanz-KI-Analyse</title>
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Finanz-KI" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="login-wrap">
+    <section class="card login">
+      <img src="icons/icon-192.png" alt="" />
+      <h1>Finanz-KI-Analyse</h1>
+      <p class="muted">Bitte mit dem App-Passwort anmelden.</p>
+      <form method="post" action="/login">
+        <input type="password" name="passwort" placeholder="Passwort" autocomplete="current-password" required autofocus />
+        <button type="submit" class="primary">Anmelden</button>
+      </form>
+      <p id="fehler" class="error small" hidden></p>
+    </section>
+  </main>
+  <script src="login.js"></script>
+</body>
+</html>

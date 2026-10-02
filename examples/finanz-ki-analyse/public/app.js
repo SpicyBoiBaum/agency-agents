@@ -1,7 +1,5 @@
 // Frontend der Finanz-KI-Analyse (ohne Build-Schritt).
 
-import { createAlertStore } from './alerts.js';
-
 const $ = (id) => document.getElementById(id);
 
 const QUICKPICKS = {
@@ -58,17 +56,50 @@ const fmtBig = (v) =>
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-async function api(path) {
-  const res = await fetch(path);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Fehler ${res.status}`);
-  return body;
+async function api(path, { method = 'GET', body } = {}) {
+  const res = await fetch(path, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) {
+    location.href = '/login'; // Sitzung abgelaufen
+    throw new Error('Nicht angemeldet');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
+  return data;
 }
 
 // ---- Zustand ----------------------------------------------------------------
 
 const state = { symbol: null, range: '1y', quote: null, analysis: null, prices: {} };
-const alerts = createAlertStore();
+
+// Kursalarme liegen auf dem Server: Er prüft sie auch bei geschlossener App
+// und schickt Push-Benachrichtigungen. Hier nur eine lokale Kopie der Liste.
+const alerts = {
+  list: [],
+  all: () => alerts.list.slice(),
+  forSymbol: (symbol) => alerts.list.filter((a) => a.symbol === symbol),
+  activeSymbols: () => [...new Set(alerts.list.filter((a) => !a.ausgeloestAm).map((a) => a.symbol))],
+  async load() {
+    alerts.list = await api('/api/alerts');
+    return alerts.list;
+  },
+  async add(data) {
+    const created = await api('/api/alerts', { method: 'POST', body: data });
+    alerts.list.push(created);
+    return created;
+  },
+  async remove(id) {
+    await api(`/api/alerts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    alerts.list = alerts.list.filter((a) => a.id !== id);
+  },
+  async rearm(id) {
+    const updated = await api(`/api/alerts/${encodeURIComponent(id)}/rearm`, { method: 'POST', body: {} });
+    alerts.list = alerts.list.map((a) => (a.id === id ? updated : a));
+  },
+};
 
 const store = {
   get(key, fallback) {
@@ -668,7 +699,6 @@ function renderAlerts() {
   const all = alerts.all().sort((a, b) => Boolean(a.ausgeloestAm) - Boolean(b.ausgeloestAm) || a.symbol.localeCompare(b.symbol));
   $('alerts').innerHTML = all.map((a) => alertItem(a, { showSymbol: true })).join('');
   $('alerts-empty').hidden = all.length > 0;
-  $('notify-btn').hidden = !(all.length && 'Notification' in window && Notification.permission === 'default');
 
   if (state.symbol) {
     $('alert-symbol').textContent = state.quote?.name ? `${state.quote.name} (${state.symbol})` : state.symbol;
@@ -699,21 +729,18 @@ function renderAlerts() {
   }
 }
 
-function onAlertListClick(e) {
+async function onAlertListClick(e) {
   const li = e.target.closest('li[data-id]');
   if (!li) return;
   const action = e.target.closest('button')?.dataset.action;
-  if (action === 'remove') alerts.remove(li.dataset.id);
-  else if (action === 'rearm') {
-    const a = alerts.all().find((x) => x.id === li.dataset.id);
-    const kurs = a && currentPrice(a.symbol);
-    // Liegt der Kurs noch jenseits der Marke, würde der Alarm sofort wieder auslösen.
-    if (a && kurs != null && (a.richtung === 'ueber' ? kurs >= a.ziel : kurs <= a.ziel)) {
-      return toast(`Der Kurs von ${a.symbol} liegt noch ${a.richtung === 'ueber' ? 'über' : 'unter'} ${fmtPrice(a.ziel, a.waehrung)}. Lege besser einen neuen Alarm an.`);
-    }
-    alerts.rearm(li.dataset.id);
-  } else if (e.target.closest('[data-open]')) return pick(e.target.closest('[data-open]').dataset.open);
-  else return;
+  try {
+    if (action === 'remove') await alerts.remove(li.dataset.id);
+    else if (action === 'rearm') await alerts.rearm(li.dataset.id);
+    else if (e.target.closest('[data-open]')) return pick(e.target.closest('[data-open]').dataset.open);
+    else return;
+  } catch (err) {
+    toast(esc(err.message), { timeout: 8000 });
+  }
   renderAlerts();
 }
 $('alerts').addEventListener('click', onAlertListClick);
@@ -759,39 +786,30 @@ $('alert-price').addEventListener('input', () => {
   const v = Number($('alert-price').value);
   if (v && state.quote?.kurs) $('alert-dir').value = v < state.quote.kurs ? 'unter' : 'ueber';
 });
-$('alert-form').addEventListener('submit', (e) => {
+$('alert-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const q = state.quote;
   if (!q) return;
+  const button = $('alert-form').querySelector('button[type=submit]');
+  button.disabled = true;
   try {
-    alerts.add({
+    await alerts.add({
       symbol: q.symbol,
-      name: q.name,
-      waehrung: q.waehrung,
-      ziel: $('alert-price').value,
+      ziel: Number($('alert-price').value),
       richtung: $('alert-dir').value,
       notiz: $('alert-note').value.trim(),
-      aktuell: q.kurs,
     });
     $('alert-form-error').hidden = true;
     $('alert-note').value = '';
     renderAlerts();
-    requestNotifications();
-    scheduleLive(); // ggf. Hintergrund-Prüfung aktivieren
+    if (push.state === 'off') toast('Tipp: Aktiviere in der Seitenleiste unter „Kursalarme“ (auf dem Handy ganz unten) die Push-Benachrichtigungen, damit dich Alarme auch bei geschlossener App erreichen.', { timeout: 10000 });
   } catch (err) {
     $('alert-form-error').textContent = err.message;
     $('alert-form-error').hidden = false;
+  } finally {
+    button.disabled = false;
   }
 });
-
-function requestNotifications() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission()
-      .catch(() => {})
-      .finally(renderAlerts);
-  }
-}
-$('notify-btn').addEventListener('click', requestNotifications);
 
 function toast(html, { onClick, timeout = 0 } = {}) {
   const el = document.createElement('div');
@@ -824,43 +842,169 @@ function beep() {
   }
 }
 
+// Meldung in der App, wenn der Server einen Alarm ausgelöst hat. (Die
+// System-Benachrichtigung kommt per Push vom Server.)
 function notifyAlert(a) {
   const text = `${a.symbol} ${a.richtung === 'ueber' ? 'ist über' : 'ist unter'} ${fmtPrice(a.ziel, a.waehrung)} – aktuell ${fmtPrice(a.ausloesekurs, a.waehrung)}`;
   toast(`<strong>🔔 Kursalarm: ${esc(a.name)}</strong><br>${esc(text)}${a.notiz ? `<br><span class="muted">${esc(a.notiz)}</span>` : ''}`, {
     onClick: () => pick(a.symbol),
   });
   beep();
-  if ('Notification' in window && Notification.permission === 'granted') {
+}
+
+const seenFired = new Set();
+const firedKey = (a) => `${a.id}:${a.ausgeloestAm}`;
+
+async function refreshAlerts({ initial = false } = {}) {
+  try {
+    await alerts.load();
+  } catch {
+    return;
+  }
+  for (const a of alerts.list) {
+    if (!a.ausgeloestAm || seenFired.has(firedKey(a))) continue;
+    seenFired.add(firedKey(a));
+    // Beim ersten Laden nur kürzlich ausgelöste Alarme melden.
+    if (!initial || Date.now() - Date.parse(a.ausgeloestAm) < 10 * 60_000) notifyAlert(a);
+  }
+  renderAlerts();
+}
+
+// Alarme aus der Vorgängerversion (im Browser gespeichert) einmalig auf den Server übernehmen.
+async function migrateLocalAlerts() {
+  let old;
+  try {
+    old = JSON.parse(localStorage.getItem('kursalarme') || 'null');
+  } catch {
+    return;
+  }
+  if (!Array.isArray(old) || !old.length) return;
+  let moved = 0;
+  for (const a of old.filter((x) => !x.ausgeloestAm)) {
     try {
-      const n = new Notification(`🔔 Kursalarm: ${a.name}`, { body: a.notiz ? `${text}\n${a.notiz}` : text, tag: a.id });
-      n.onclick = () => {
-        window.focus();
-        pick(a.symbol);
-        n.close();
-      };
+      await alerts.add({ symbol: a.symbol, ziel: a.ziel, richtung: a.richtung, notiz: a.notiz || '' });
+      moved++;
     } catch {
-      // manche Browser erlauben Notification nur über einen Service Worker
+      // z. B. inzwischen erreichter Preis – überspringen
     }
   }
-}
-
-function checkAlerts(live) {
-  const fired = alerts.check(live);
-  fired.forEach(notifyAlert);
-  if (fired.length || alerts.all().length) renderAlerts();
-}
-
-window.addEventListener('storage', (e) => {
-  if (e.key === alerts.key) {
-    alerts.reload();
-    renderAlerts();
+  try {
+    localStorage.removeItem('kursalarme');
+  } catch {
+    // egal
   }
+  if (moved) toast(`${moved} Kursalarm(e) auf den Server übernommen – sie werden jetzt auch bei geschlossener App geprüft.`, { timeout: 8000 });
+}
+
+// ---- Push-Benachrichtigungen & installierbare App ---------------------------
+
+const push = { state: 'unknown', registration: null };
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function urlBase64ToUint8Array(base64) {
+  const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+async function renderPush() {
+  const box = $('push-box');
+  let html;
+  if (!window.isSecureContext) {
+    push.state = 'unsupported';
+    html = 'Push-Benachrichtigungen brauchen eine sichere Verbindung (HTTPS). Online gehostet funktioniert es automatisch.';
+  } else if (isIos && !isStandalone) {
+    push.state = 'unsupported';
+    html = 'Auf dem iPhone/iPad: erst über <strong>Teilen → „Zum Home-Bildschirm“</strong> installieren und die App von dort öffnen. Dann lassen sich hier Push-Benachrichtigungen aktivieren.';
+  } else if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    push.state = 'unsupported';
+    html = 'Dieser Browser unterstützt keine Push-Benachrichtigungen.';
+  } else if (Notification.permission === 'denied') {
+    push.state = 'denied';
+    html = 'Benachrichtigungen sind blockiert. Erlaube sie in den Browser- bzw. Handy-Einstellungen für diese Seite.';
+  } else {
+    const sub = await push.registration?.pushManager.getSubscription();
+    push.state = sub ? 'on' : 'off';
+    html = sub
+      ? '✅ Push aktiv auf diesem Gerät.<div class="chip-group"><button class="chip" data-push="test">Test senden</button><button class="chip" data-push="off">Deaktivieren</button></div>'
+      : '<button class="chip" data-push="on">📲 Push-Benachrichtigungen aktivieren</button><div>Dann kommen Alarme auch an, wenn die App geschlossen ist.</div>';
+  }
+  box.innerHTML = html;
+}
+
+async function enablePush() {
+  if ((await Notification.requestPermission()) !== 'granted') return renderPush();
+  const { publicKey } = await api('/api/push/key');
+  const sub = await push.registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(publicKey),
+  });
+  await api('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+  toast('Push-Benachrichtigungen sind aktiv. Mit „Test senden“ kannst du es ausprobieren.', { timeout: 6000 });
+}
+
+async function disablePush() {
+  const sub = await push.registration?.pushManager.getSubscription();
+  if (sub) {
+    await api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {});
+    await sub.unsubscribe();
+  }
+}
+
+$('push-box').addEventListener('click', async (e) => {
+  const action = e.target.closest('[data-push]')?.dataset.push;
+  if (!action) return;
+  e.target.disabled = true;
+  try {
+    if (action === 'on') await enablePush();
+    else if (action === 'off') await disablePush();
+    else if (action === 'test') {
+      const r = await api('/api/push/test', { method: 'POST', body: {} });
+      if (!r.gesendet) toast('Test konnte nicht zugestellt werden. Deaktiviere Push und aktiviere es erneut.', { timeout: 8000 });
+    }
+  } catch (err) {
+    toast(esc(err.message), { timeout: 8000 });
+  }
+  renderPush();
+});
+
+async function initServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return renderPush();
+  try {
+    await navigator.serviceWorker.register('/sw.js');
+    push.registration = await navigator.serviceWorker.ready;
+    // Bestehendes Abo erneut melden (z. B. nach einem Server-Neustart ohne Daten).
+    const sub = await push.registration.pushManager?.getSubscription();
+    if (sub) api('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } }).catch(() => {});
+  } catch (err) {
+    console.warn('Service Worker:', err);
+  }
+  renderPush();
+}
+
+// Klick auf eine Benachrichtigung: der Service Worker schickt das Symbol hierher.
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type === 'open' && e.data.symbol) pick(e.data.symbol);
+});
+
+// „App installieren“ (Android/Chrome/Edge)
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $('install-btn').hidden = false;
+});
+$('install-btn').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => {});
+  installPrompt = null;
+  $('install-btn').hidden = true;
 });
 
 // ---- Live-Kurse --------------------------------------------------------------
 
-const LIVE_INTERVAL_MS = 15_000; // Kurs + Watchlist
-const BACKGROUND_INTERVAL_MS = 60_000; // Hintergrund-Tab: nur wenn Alarme aktiv sind
+const LIVE_INTERVAL_MS = 15_000; // Kurs, Watchlist, Alarme
 const MACRO_EVERY_N_TICKS = 4; // Makro-Leiste etwa jede Minute
 let liveTimer = null;
 let liveTick = 0;
@@ -916,31 +1060,28 @@ async function refreshLive() {
       api(`/api/live?symbols=${encodeURIComponent(symbols.join(','))}`).then((live) => {
         if (state.symbol && live[state.symbol]) updateAssetLive(live[state.symbol]);
         updateWatchlistPrices(live);
-        checkAlerts(live);
       }),
     );
   }
-  if (!document.hidden && liveTick % MACRO_EVERY_N_TICKS === 0) tasks.push(renderMacro());
+  // Nach den Live-Kursen: der Server hat die Alarme damit gerade geprüft.
+  tasks.push(tasks.length ? tasks[0].finally(() => refreshAlerts()) : refreshAlerts());
+  if (liveTick % MACRO_EVERY_N_TICKS === 0) tasks.push(renderMacro());
   liveTick++;
   await Promise.allSettled(tasks);
 }
 
 function scheduleLive() {
   clearTimeout(liveTimer);
-  // Im Hintergrund-Tab pausieren – außer Kursalarme müssen überwacht werden.
-  const hasAlerts = alerts.activeSymbols().length > 0;
-  if (document.hidden && !hasAlerts) return;
-  liveTimer = setTimeout(
-    async () => {
-      await refreshLive();
-      scheduleLive();
-    },
-    document.hidden ? BACKGROUND_INTERVAL_MS : LIVE_INTERVAL_MS,
-  );
+  // Im Hintergrund pausieren – Alarme prüft der Server ohnehin selbst.
+  if (document.hidden) return;
+  liveTimer = setTimeout(async () => {
+    await refreshLive();
+    scheduleLive();
+  }, LIVE_INTERVAL_MS);
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return scheduleLive();
+  if (document.hidden) return clearTimeout(liveTimer);
   refreshLive().finally(scheduleLive); // beim Zurückkehren sofort aktualisieren
 });
 
@@ -948,8 +1089,8 @@ document.addEventListener('visibilitychange', () => {
 
 renderMacro();
 renderWatchlist();
-renderAlerts();
-if (alerts.activeSymbols().length) refreshLive(); // Alarme sofort prüfen
+migrateLocalAlerts().finally(() => refreshAlerts({ initial: true }));
+initServiceWorker();
 scheduleLive();
 if (location.hash.length > 1) openSymbol(decodeURIComponent(location.hash.slice(1)).toUpperCase());
 api('/api/health')
@@ -957,5 +1098,6 @@ api('/api/health')
     if (!h.ki) {
       $('analyze').title = 'Auf dem Server ist kein ANTHROPIC_API_KEY gesetzt.';
     }
+    $('logout').hidden = !h.anmeldung;
   })
   .catch(() => {});

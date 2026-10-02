@@ -28,6 +28,11 @@ async function cached(key, ttlMs, fn) {
   return value;
 }
 
+// Für Tests: zwischengespeicherte Antworten verwerfen.
+export function clearMarketCache() {
+  cache.clear();
+}
+
 async function getJson(url, { headers = {}, timeoutMs = 12000 } = {}) {
   const res = await fetch(url, {
     headers: { 'User-Agent': UA, Accept: 'application/json', ...headers },
@@ -426,6 +431,7 @@ export async function getLive(symbol) {
   const crypto = meta.instrumentType === 'CRYPTOCURRENCY';
   return {
     symbol: meta.symbol,
+    name: meta.longName || meta.shortName || meta.symbol,
     waehrung: meta.currency,
     kurs: price,
     vortag: prev,
