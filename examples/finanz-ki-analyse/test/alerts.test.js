@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAlertStore } from '../public/alerts.js';
+import { createAlertStore } from '../src/alerts.js';
 
 function storage() {
   const m = new Map();

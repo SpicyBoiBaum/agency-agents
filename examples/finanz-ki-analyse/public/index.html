@@ -4,7 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Finanz-KI-Analyse</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Finanz-KI" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
@@ -16,6 +23,10 @@
     <div class="search">
       <input id="search" type="search" autocomplete="off" placeholder="Aktie, ETF oder Krypto suchen – z. B. Apple, MSCI World, Bitcoin, SAP.DE" />
       <ul id="suggestions" class="suggestions" hidden></ul>
+    </div>
+    <div class="top-actions">
+      <button id="install-btn" class="chip" hidden>📲 Installieren</button>
+      <a id="logout" class="chip" href="/logout" hidden>Abmelden</a>
     </div>
   </header>
 
@@ -32,7 +43,7 @@
         <h3>Kursalarme</h3>
         <ul id="alerts" class="alert-list"></ul>
         <p id="alerts-empty" class="muted small">Keine Alarme. Öffne einen Wert und klicke auf 🔔.</p>
-        <button id="notify-btn" class="chip" hidden>🔔 Browser-Benachrichtigungen erlauben</button>
+        <div id="push-box" class="push-box small"></div>
       </section>
       <section>
         <h3>Schnellauswahl</h3>
@@ -83,7 +94,7 @@
           <div class="chip-group small" id="alert-presets"></div>
           <div id="alert-form-error" class="error small" hidden></div>
           <ul id="alert-symbol-list" class="alert-list"></ul>
-          <p class="muted small">Alarme werden geprüft, solange die App in einem Browser-Tab geöffnet ist (auch im Hintergrund, dann etwa einmal pro Minute). Sie sind nur in diesem Browser gespeichert.</p>
+          <p class="muted small">Der Server prüft die Alarme etwa jede Minute, auch wenn die App geschlossen ist. Mit aktivierten Push-Benachrichtigungen (links unter „Kursalarme“) bekommst du sie aufs Handy bzw. den Computer.</p>
         </section>
 
         <section class="card">
