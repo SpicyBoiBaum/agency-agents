@@ -5,9 +5,10 @@ Web-App, die **Kurse von Aktien, ETFs und Kryptowährungen** anzeigt und per Kli
 ## Funktionen
 
 - **Suche** nach Name, Ticker oder ISIN-nahen Begriffen (z. B. „Apple“, „MSCI World“, „Bitcoin“, `SAP.DE`, `BTC-EUR`)
+- **Live-Kurse**: Kurs, Tagesveränderung, letzte Chart-Kerze, Watchlist und Makro-Leiste aktualisieren sich automatisch (alle 15 s, Makro jede Minute). Kursänderungen blinken grün/rot, und eine Anzeige zeigt „● Live“ oder „Börse geschlossen“. Im Hintergrund-Tab pausiert die Aktualisierung.
 - **Kerzen-Chart** mit SMA 50/200 und Volumen, Zeiträume 1M bis Max
 - **Technische Kennzahlen**: Trend, RSI, MACD, Bollinger-Bänder, ATR, Volatilität, Max. Drawdown, 52W-Hoch/Tief, Golden/Death Cross, Unterstützungen/Widerstände, Performance (1W bis 5J, YTD)
-- **Makro-Leiste**: S&P 500, Nasdaq, DAX, Euro Stoxx 50, VIX, US-10J-Rendite, Dollar-Index, EUR/USD, Gold, Öl, Bitcoin
+- **Makro-Leiste** (Tagesveränderung): S&P 500, Nasdaq, DAX, Euro Stoxx 50, VIX, US-10J-Rendite, Dollar-Index, EUR/USD, Gold, Öl, Bitcoin
 - **Watchlist** (im Browser gespeichert) und Schnellauswahl
 - **Schlagzeilen** zum gewählten Wert
 - **KI-Analyse** (live gestreamt):
@@ -67,7 +68,7 @@ public/              Frontend (HTML/CSS/JS, kein Build-Schritt)
 test/                Unit- und End-to-End-Tests mit simulierten APIs
 ```
 
-API-Endpunkte: `/api/search?q=`, `/api/quote?symbol=&range=`, `/api/news?q=`, `/api/macro`, `/api/analyze?symbol=&focus=` (Server-Sent Events), `/api/health`.
+API-Endpunkte: `/api/search?q=`, `/api/quote?symbol=&range=`, `/api/live?symbols=A,B,C`, `/api/macro/live`, `/api/news?q=`, `/api/macro`, `/api/analyze?symbol=&focus=` (Server-Sent Events), `/api/health`.
 
 ```bash
 npm test
@@ -75,6 +76,6 @@ npm test
 
 ## Hinweise
 
-- Datenquellen sind inoffiziell bzw. kostenlos. Kurse können verzögert sein, und einzelne Quellen (z. B. Fundamentaldaten von Yahoo) fallen manchmal aus. Die KI ergänzt fehlende Daten dann per Websuche.
+- Datenquellen sind inoffiziell bzw. kostenlos. „Live“ heißt: so aktuell, wie Yahoo die Kurse liefert. Das ist für viele Börsen in Echtzeit, für manche (z. B. Xetra) bis zu 15 Minuten verzögert. Krypto läuft rund um die Uhr. Einzelne Quellen (z. B. Fundamentaldaten von Yahoo) fallen manchmal aus. Die KI ergänzt fehlende Daten dann per Websuche.
 - Der Server lauscht standardmäßig nur auf `127.0.0.1`. Wer ihn öffentlich betreibt, sollte Authentifizierung und Rate-Limits davorschalten, weil jede Analyse API-Kosten verursacht.
 - **Keine Anlageberatung.** Die KI kann sich irren. Alle Angaben ohne Gewähr.

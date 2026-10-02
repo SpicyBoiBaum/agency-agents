@@ -190,3 +190,16 @@ button.primary:disabled { opacity: 0.6; cursor: progress; }
   .ai-controls { flex-direction: column; max-width: none; }
   .factor { grid-template-columns: 1fr 1fr 32px; }
 }
+
+/* Live-Aktualisierung */
+.live { font-weight: 600; }
+.live::before { content: '●'; margin-right: 0.25rem; }
+.live.open { color: var(--up); }
+.live.open::before { animation: pulse 2s ease-in-out infinite; }
+.live.closed { color: var(--muted); }
+@keyframes pulse { 50% { opacity: 0.3; } }
+.flash-up { animation: flash-up 1.2s ease-out; }
+.flash-down { animation: flash-down 1.2s ease-out; }
+@keyframes flash-up { from { background: color-mix(in srgb, var(--up) 35%, transparent); } to { background: transparent; } }
+@keyframes flash-down { from { background: color-mix(in srgb, var(--down) 35%, transparent); } to { background: transparent; } }
+.price, .watchlist [data-price], .macro > span { border-radius: 6px; }

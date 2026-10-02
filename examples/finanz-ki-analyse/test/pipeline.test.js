@@ -15,7 +15,7 @@ function yahooChart(symbol, instrumentType) {
   return {
     chart: {
       result: [{
-        meta: { symbol, instrumentType, currency: 'USD', longName: `${symbol} Inc.`, regularMarketPrice: close.at(-1), fullExchangeName: 'NASDAQ' },
+        meta: { symbol, instrumentType, currency: 'USD', longName: `${symbol} Inc.`, regularMarketPrice: close.at(-1), chartPreviousClose: close.at(-2), fullExchangeName: 'NASDAQ', regularMarketTime: ts.at(-1), gmtoffset: -14400, currentTradingPeriod: { regular: { start: ts.at(-1) - 3600, end: ts.at(-1) + 3600 } } },
         timestamp: ts,
         indicators: { quote: [{ open: close, high: close.map((c) => c + 1), low: close.map((c) => c - 1), close, volume: close.map(() => 1e6) }] },
       }],
@@ -109,4 +109,13 @@ test('Analyse-Kontext und KI-Stream inkl. pause_turn', async () => {
   assert.equal(second.fallbacks, 'default');
   assert.equal(second.tools[0].type, 'web_search_20260209');
   assert.match(new Headers(apiCalls[0].init.headers).get('anthropic-beta'), /server-side-fallback-2026-07-01/);
+});
+
+test('Live-Kurse: Tagesveränderung und Börsenstatus', async () => {
+  const { getLiveMany } = await import('../src/market.js');
+  const live = await getLiveMany(['AAPL', '^GSPC']);
+  assert.ok(live.AAPL.kurs > 0);
+  assert.equal(typeof live.AAPL.veraenderungTag, 'number');
+  assert.equal(live.AAPL.waehrung, 'USD');
+  assert.ok('boerseOffen' in live.AAPL);
 });

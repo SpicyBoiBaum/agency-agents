@@ -183,17 +183,35 @@ async function renderWatchlist() {
         `<li data-symbol="${esc(w.symbol)}"><span><span class="sym">${esc(w.symbol)}</span><br><span class="muted small">${esc(w.name)}</span></span><span class="small" data-price>…</span></li>`,
     )
     .join('');
-  await Promise.all(
-    list.map(async (w) => {
-      const el = $('watchlist').querySelector(`[data-symbol="${CSS.escape(w.symbol)}"] [data-price]`);
-      try {
-        const q = await api(`/api/quote?symbol=${encodeURIComponent(w.symbol)}&range=1mo`);
-        el.innerHTML = `${fmtPrice(q.kurs, q.waehrung)}<br><span class="${cls(q.veraenderungTag)}">${fmtPct(q.veraenderungTag)}</span>`;
-      } catch {
-        el.textContent = '–';
-      }
-    }),
-  );
+  if (list.length) {
+    try {
+      updateWatchlistPrices(await api(`/api/live?symbols=${encodeURIComponent(list.map((w) => w.symbol).join(','))}`));
+    } catch {
+      // Preise erscheinen beim nächsten Live-Update
+    }
+  }
+}
+
+function flash(el, dir) {
+  if (!el || !dir) return;
+  el.classList.remove('flash-up', 'flash-down');
+  void el.offsetWidth; // Animation neu starten
+  el.classList.add(dir > 0 ? 'flash-up' : 'flash-down');
+}
+
+function updateWatchlistPrices(live) {
+  for (const li of $('watchlist').querySelectorAll('li[data-symbol]')) {
+    const q = live[li.dataset.symbol];
+    const el = li.querySelector('[data-price]');
+    if (!q) {
+      if (el.textContent === '…') el.textContent = '–';
+      continue;
+    }
+    const prev = Number(el.dataset.kurs);
+    el.dataset.kurs = q.kurs;
+    el.innerHTML = `${fmtPrice(q.kurs, q.waehrung)}<br><span class="${cls(q.veraenderungTag)}">${fmtPct(q.veraenderungTag)}</span>`;
+    if (prev && q.kurs !== prev) flash(el, q.kurs - prev);
+  }
 }
 $('watchlist').addEventListener('click', (e) => {
   const li = e.target.closest('li');
@@ -202,17 +220,25 @@ $('watchlist').addEventListener('click', (e) => {
 
 // ---- Makro-Leiste -----------------------------------------------------------
 
+const macroLast = {};
 async function renderMacro() {
   try {
-    const rows = await api('/api/macro');
+    const rows = await api('/api/macro/live');
     $('macro').innerHTML = rows
       .map(
         (r) =>
-          `<span title="${esc(r.name)} – Veränderung 1 Monat"><b>${esc(r.name.replace(/ \(.*\)/, ''))}</b>${nf(2).format(r.wert)} <span class="${cls(r.veraenderung1M)}">${fmtPct(r.veraenderung1M, 1)}</span></span>`,
+          `<span data-symbol="${esc(r.symbol)}" title="${esc(r.name)} – Veränderung heute${r.boerseOffen === false ? ' (Börse geschlossen)' : ''}"><b>${esc(r.name.replace(/ \(.*\)/, ''))}</b>${nf(2).format(r.kurs)} <span class="${cls(r.veraenderungTag)}">${fmtPct(r.veraenderungTag)}</span></span>`,
       )
       .join('');
+    for (const r of rows) {
+      if (macroLast[r.symbol] && macroLast[r.symbol] !== r.kurs) {
+        flash($('macro').querySelector(`[data-symbol="${CSS.escape(r.symbol)}"]`), r.kurs - macroLast[r.symbol]);
+      }
+      macroLast[r.symbol] = r.kurs;
+    }
+    $('macro').hidden = rows.length === 0;
   } catch {
-    $('macro').hidden = true;
+    if (!$('macro').children.length) $('macro').hidden = true;
   }
 }
 
@@ -284,6 +310,7 @@ function renderChart(candles) {
     })),
   );
   chart.timeScale().fitContent();
+  state.lastCandle = clean.at(-1) ? { ...clean.at(-1) } : null;
 }
 
 $('ranges').addEventListener('click', (e) => {
@@ -365,6 +392,10 @@ async function loadQuote(symbol, { keepAnalysis = false } = {}) {
     state.quote = q;
     renderQuote(q);
     if (!keepAnalysis) loadNews(q);
+    // Live-Status und aktuellsten Kurs sofort holen, nicht erst beim nächsten Intervall
+    api(`/api/live?symbols=${encodeURIComponent(symbol)}`)
+      .then((live) => live[symbol] && symbol === state.symbol && updateAssetLive(live[symbol]))
+      .catch(() => {});
   } catch (err) {
     $('welcome').hidden = false;
     $('asset').hidden = true;
@@ -597,10 +628,89 @@ async function startAnalysis() {
 $('analyze').addEventListener('click', startAnalysis);
 $('focus').addEventListener('keydown', (e) => e.key === 'Enter' && startAnalysis());
 
+// ---- Live-Kurse --------------------------------------------------------------
+
+const LIVE_INTERVAL_MS = 15_000; // Kurs + Watchlist
+const MACRO_EVERY_N_TICKS = 4; // Makro-Leiste etwa jede Minute
+let liveTimer = null;
+let liveTick = 0;
+
+// Letzte Tageskerze mit dem Live-Kurs fortschreiben (oder neue Kerze beginnen).
+function updateChartLive(q) {
+  const last = state.lastCandle;
+  if (!chart || !last || !q.kurs || !q.zeitstempel) return;
+  const day = (t) => Math.floor((t + (q.gmtOffset || 0)) / 86400);
+  let candle;
+  if (day(q.zeitstempel) === day(last.time)) {
+    candle = { ...last, close: q.kurs, high: Math.max(last.high, q.kurs), low: Math.min(last.low, q.kurs) };
+    if (q.volumen) candle.volume = q.volumen;
+  } else if (q.zeitstempel > last.time) {
+    candle = { time: q.zeitstempel, open: q.kurs, high: q.kurs, low: q.kurs, close: q.kurs, volume: q.volumen || 0 };
+  } else {
+    return;
+  }
+  state.lastCandle = candle;
+  const { time, open, high, low, close } = candle;
+  series.candles.update({ time, open, high, low, close });
+  series.volume.update({
+    time,
+    value: candle.volume || 0,
+    color: `${close >= open ? cssVar('--up') : cssVar('--down')}55`,
+  });
+}
+
+function updateAssetLive(q) {
+  const cur = state.quote;
+  if (!cur || q.symbol !== cur.symbol) return;
+  const prev = cur.kurs;
+  cur.kurs = q.kurs;
+  cur.veraenderungTag = q.veraenderungTag;
+  $('asset-price').textContent = fmtPrice(q.kurs, cur.waehrung);
+  $('asset-change').innerHTML = `<span class="${cls(q.veraenderungTag)}">${fmtPct(q.veraenderungTag)} heute</span>`;
+  if (q.zeitpunkt) $('asset-time').textContent = `Stand: ${new Date(q.zeitpunkt).toLocaleString('de-DE')}`;
+  const live = $('asset-live');
+  live.hidden = q.boerseOffen == null;
+  live.className = `live ${q.boerseOffen ? 'open' : 'closed'}`;
+  live.textContent = q.boerseOffen ? 'Live' : 'Börse geschlossen';
+  if (prev && q.kurs !== prev) flash($('asset-price'), q.kurs - prev);
+  updateChartLive(q);
+}
+
+async function refreshLive() {
+  const symbols = [...new Set([state.symbol, ...getWatchlist().map((w) => w.symbol)].filter(Boolean))];
+  const tasks = [];
+  if (symbols.length) {
+    tasks.push(
+      api(`/api/live?symbols=${encodeURIComponent(symbols.join(','))}`).then((live) => {
+        if (state.symbol && live[state.symbol]) updateAssetLive(live[state.symbol]);
+        updateWatchlistPrices(live);
+      }),
+    );
+  }
+  if (liveTick % MACRO_EVERY_N_TICKS === 0) tasks.push(renderMacro());
+  liveTick++;
+  await Promise.allSettled(tasks);
+}
+
+function scheduleLive() {
+  clearTimeout(liveTimer);
+  if (document.hidden) return; // im Hintergrund-Tab pausieren
+  liveTimer = setTimeout(async () => {
+    await refreshLive();
+    scheduleLive();
+  }, LIVE_INTERVAL_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return clearTimeout(liveTimer);
+  refreshLive().finally(scheduleLive); // beim Zurückkehren sofort aktualisieren
+});
+
 // ---- Start ------------------------------------------------------------------
 
 renderMacro();
 renderWatchlist();
+scheduleLive();
 if (location.hash.length > 1) openSymbol(decodeURIComponent(location.hash.slice(1)).toUpperCase());
 api('/api/health')
   .then((h) => {

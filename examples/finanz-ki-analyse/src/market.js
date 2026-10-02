@@ -69,7 +69,9 @@ export function assetType(instrumentType) {
 // ---- Yahoo Finance ----------------------------------------------------------
 
 export async function getChart(symbol, range = '2y', interval = '1d') {
-  return cached(`chart:${symbol}:${range}:${interval}`, 60_000, async () => {
+  // Intraday-Abfragen (Live-Kurse) nur kurz cachen, Historie länger.
+  const ttl = range === '1d' ? 10_000 : 60_000;
+  return cached(`chart:${symbol}:${range}:${interval}`, ttl, async () => {
     const url = `${YF1}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false&events=div%2Csplits`;
     let data;
     try {
@@ -409,6 +411,43 @@ export async function getMacro() {
     );
     return rows.filter(Boolean);
   });
+}
+
+// ---- Live-Kurse --------------------------------------------------------------
+
+// Aktueller Kurs eines Symbols (ca. 10 s gecacht). `boerseOffen` wird aus den
+// Handelszeiten der Börse berechnet; Krypto handelt rund um die Uhr.
+export async function getLive(symbol) {
+  const { meta } = await getChart(symbol, '1d', '5m');
+  const prev = meta.chartPreviousClose ?? meta.previousClose;
+  const price = meta.regularMarketPrice;
+  const period = meta.currentTradingPeriod?.regular;
+  const now = Date.now() / 1000;
+  const crypto = meta.instrumentType === 'CRYPTOCURRENCY';
+  return {
+    symbol: meta.symbol,
+    waehrung: meta.currency,
+    kurs: price,
+    vortag: prev,
+    veraenderungTag: prev ? price / prev - 1 : null,
+    tagesHoch: meta.regularMarketDayHigh,
+    tagesTief: meta.regularMarketDayLow,
+    volumen: meta.regularMarketVolume,
+    zeitpunkt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
+    zeitstempel: meta.regularMarketTime,
+    gmtOffset: meta.gmtoffset ?? 0,
+    boerseOffen: crypto || (period ? now >= period.start && now < period.end : null),
+  };
+}
+
+export async function getLiveMany(symbols) {
+  const rows = await Promise.all(symbols.map((s) => settle(getLive(s))));
+  return Object.fromEntries(rows.filter(Boolean).map((r) => [r.symbol, r]));
+}
+
+export async function getMacroLive() {
+  const live = await getLiveMany(MACRO.map(([s]) => s));
+  return MACRO.filter(([s]) => live[s]).map(([s, name]) => ({ ...live[s], name }));
 }
 
 // ---- Gesamtpaket für Anzeige + Analyse --------------------------------------

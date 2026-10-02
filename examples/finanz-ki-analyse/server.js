@@ -12,7 +12,7 @@ try {
   // keine .env vorhanden – Umgebungsvariablen werden direkt genutzt
 }
 
-const { getQuote, getNews, search, getMacro, getAnalysisContext, SYMBOL_RE } = await import('./src/market.js');
+const { getQuote, getNews, search, getMacro, getMacroLive, getLiveMany, getAnalysisContext, SYMBOL_RE } = await import('./src/market.js');
 const { runAnalysis } = await import('./src/analysis.js');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -120,6 +120,14 @@ const server = http.createServer(async (req, res) => {
         const q = (url.searchParams.get('q') || '').trim().slice(0, 80);
         return sendJson(res, 200, q ? await getNews(q) : []);
       }
+      case '/api/live': {
+        const symbols = [...new Set((url.searchParams.get('symbols') || '').split(',').map((s) => s.trim().toUpperCase()))]
+          .filter((s) => SYMBOL_RE.test(s))
+          .slice(0, 40);
+        return sendJson(res, 200, symbols.length ? await getLiveMany(symbols) : {});
+      }
+      case '/api/macro/live':
+        return sendJson(res, 200, await getMacroLive());
       case '/api/macro':
         return sendJson(res, 200, await getMacro());
       case '/api/analyze':
